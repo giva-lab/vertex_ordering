@@ -21,21 +21,21 @@ import branca.colormap as cm
 from sklearn.metrics.pairwise import pairwise_distances,haversine_distances
 import matplotlib.pyplot as plt
 sys.path.append(os.getcwd())
-from src.utils import get_topological_measure
+from src.utils import get_topological_measure, get_topological_measure_optimized
 import CityHub
 from sklearn.neighbors import NearestNeighbors
 
 
 # Loading pre-computed city data (if it exists) for 'forward' and 'inverse' mappings.
 # This helps to avoid recomputation in future runs.
-if os.path.exists("forward.pkl"):
-    with open("forward.pkl", "rb") as file:
+if os.path.exists("large_forward.pkl"):
+    with open("large_forward.pkl", "rb") as file:
         cities_forward = pickle.load(file)
 
-    with open("topological.pkl", "rb") as file:
+    with open("large_topological.pkl", "rb") as file:
         cities_topological = pickle.load(file)
 
-    with open("inverse.pkl", "rb") as file:
+    with open("large_inverse.pkl", "rb") as file:
         cities_inverse = pickle.load(file)
 else:
     # If no pre-computed data is found, initialize empty dictionaries
@@ -46,12 +46,8 @@ else:
 # Defining EPSG (coordinate reference systems) for each city.
 # EPSG codes are used to properly handle geospatial data, ensuring correct map projections.
 epsg = {
-    'Busan': 'EPSG:4612',
-    'Mumbai': "EPSG:7767",
-    'Barcelona': 'EPSG:2062',
-    'Nairobi': 'EPSG:4210',
-    #'Santiago': 'EPSG:9147',
-    'Bogota': 'EPSG:21897'
+    #'São Paulo': 'EPSG:31983',
+    'Maceió': 'EPSG:31983'
 }
 
 # Loop through each city to process its street graph
@@ -109,24 +105,29 @@ for city in epsg:
     scaler.fit(nodesproj)
     nodesprojsca = scaler.transform(nodesproj)
 
-    print("Calculating TSNE")
-    # Apply t-SNE with 1 component to reduce the 2D node coordinates to 1D
-    X_embedding = openTSNE.TSNE(
-        n_components=1,
-        perplexity=2000,
-        n_jobs=10,
-        verbose=True,
-    ).fit(nodesprojsca)
+    if not os.path.exists("data/tsne_"+city+".pkl"):
+        print("Calculating TSNE")
+        # Apply t-SNE with 1 component to reduce the 2D node coordinates to 1D
+        X_embedding = openTSNE.TSNE(
+            n_components=1,
+            perplexity=2000,
+            n_jobs=30,
+            verbose=True,
+        ).fit(nodesprojsca)
 
 
-    print("Gerando dataframe")
+        print("Gerando dataframe")
 
-    nodesdf = pd.DataFrame(nodes2d)  # Create a DataFrame with the node coordinates
-    nodesdf['y'] = nodesproj[0]  # Add the y-coordinates (latitude) to the DataFrame
-    nodesdf['x'] = nodesproj[1]  # Add the x-coordinates (longitude) to the DataFrame
-    nodesdf["tsne"] = X_embedding  # Store the t-SNE 1D embedding in the DataFrame
-    nodesdf = nodesdf.sort_values('tsne').reset_index()  # Sort the DataFrame by t-SNE values and reset index
-    nodesdf["new_index"] = nodesdf.index  # Add a new column with the new sorted index
+        nodesdf = pd.DataFrame(nodes2d)  # Create a DataFrame with the node coordinates
+        nodesdf['y'] = nodesproj[0]  # Add the y-coordinates (latitude) to the DataFrame
+        nodesdf['x'] = nodesproj[1]  # Add the x-coordinates (longitude) to the DataFrame
+        nodesdf["tsne"] = X_embedding  # Store the t-SNE 1D embedding in the DataFrame
+        nodesdf = nodesdf.sort_values('tsne').reset_index()  # Sort the DataFrame by t-SNE values and reset index
+        nodesdf["new_index"] = nodesdf.index  # Add a new column with the new sorted index
+        nodesdf.to_pickle("data/tsne_"+city+".pkl")
+    else:
+        nodesdf = pd.read_pickle("data/tsne_"+city+".pkl")
+
 
     # Set up a color map to visualize the t-SNE embedding results on a map
     mi = 0
@@ -164,18 +165,21 @@ for city in epsg:
 
     # ---- UMAP Embedding ----
     print("UMAP --------------------------------------------------")
+    if not os.path.exists("data/umap_"+city+".pkl"):
+        # Create a UMAP model for 1D embedding with high n_neighbors (2000) to preserve global structure
+        umap_model = umap.UMAP(n_components=1, n_neighbors=2000, min_dist=0.5, random_state=42, n_jobs = 30)
+        umap_embedding = umap_model.fit_transform(nodesprojsca)  # Apply UMAP to the normalized projected coordinates
 
-    # Create a UMAP model for 1D embedding with high n_neighbors (2000) to preserve global structure
-    umap_model = umap.UMAP(n_components=1, n_neighbors=2000, min_dist=0.5, random_state=42)
-    umap_embedding = umap_model.fit_transform(nodesprojsca)  # Apply UMAP to the normalized projected coordinates
-
-    # Create another DataFrame to hold the UMAP results
-    nodesdf_umap = pd.DataFrame(nodes2d)  # Recreate DataFrame with original node coordinates
-    nodesdf_umap['y'] = nodesproj[0]  # Add y-coordinates (latitude)
-    nodesdf_umap['x'] = nodesproj[1]  # Add x-coordinates (longitude)
-    nodesdf_umap["umap"] = umap_embedding  # Store the UMAP embedding in the DataFrame
-    nodesdf_umap = nodesdf_umap.sort_values('umap').reset_index()  # Sort the DataFrame by UMAP values
-    nodesdf_umap["new_index"] = nodesdf_umap.index  # Assign new indices after sorting
+        # Create another DataFrame to hold the UMAP results
+        nodesdf_umap = pd.DataFrame(nodes2d)  # Recreate DataFrame with original node coordinates
+        nodesdf_umap['y'] = nodesproj[0]  # Add y-coordinates (latitude)
+        nodesdf_umap['x'] = nodesproj[1]  # Add x-coordinates (longitude)
+        nodesdf_umap["umap"] = umap_embedding  # Store the UMAP embedding in the DataFrame
+        nodesdf_umap = nodesdf_umap.sort_values('umap').reset_index()  # Sort the DataFrame by UMAP values
+        nodesdf_umap["new_index"] = nodesdf_umap.index  # Assign new indices after sorting
+        nodesdf_umap.to_pickle("data/umap_"+city+".pkl")
+    else:
+        nodesdf_umap = pd.read_pickle("data/umap_"+city+".pkl")
 
     # Reuse the same color map for UMAP visualization
     mi = 0
@@ -314,11 +318,11 @@ for city in epsg:
 
     # Topological Measure
     print("Calculating Metrics for Topological Measure")
-    topological_fiedler = get_topological_measure(nx.adjacency_matrix(G), fiedler_sorted_index_list)
-    topological_tsne = get_topological_measure(nx.adjacency_matrix(G), tsne_sorted_index_list)
-    topological_umap = get_topological_measure(nx.adjacency_matrix(G), umap_sorted_index_list)
-    topological_original = get_topological_measure(nx.adjacency_matrix(G), list(range(nodes2d.shape[0]))) 
-    topological_random = get_topological_measure(nx.adjacency_matrix(G), random_index_list) 
+    topological_fiedler = get_topological_measure_optimized(nx.adjacency_matrix(G), fiedler_sorted_index_list)
+    topological_tsne = get_topological_measure_optimized(nx.adjacency_matrix(G), tsne_sorted_index_list)
+    topological_umap = get_topological_measure_optimized(nx.adjacency_matrix(G), umap_sorted_index_list)
+    topological_original = get_topological_measure_optimized(nx.adjacency_matrix(G), list(range(nodes2d.shape[0]))) 
+    topological_random = get_topological_measure_optimized(nx.adjacency_matrix(G), random_index_list) 
     print("TOPOLOGICAL")
     print('Fiedler - Mean:', statistics.mean(topological_fiedler))
     print('Fiedler - Median:', statistics.median(topological_fiedler))
@@ -405,11 +409,11 @@ for city in epsg:
     cities_inverse['random'][city] = max_inverse_ind_dist_random
 
     # Save the forward and inverse metrics as pickle files
-    with open("forward.pkl", "wb") as file:
+    with open("large_forward.pkl", "wb") as file:
         pickle.dump(cities_forward, file)
 
-    with open("inverse.pkl", "wb") as file:
+    with open("large_inverse.pkl", "wb") as file:
         pickle.dump(cities_inverse, file)
 
-    with open("topological.pkl", "wb") as file:
+    with open("large_topological.pkl", "wb") as file:
         pickle.dump(cities_topological, file)
